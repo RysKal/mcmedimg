@@ -103,8 +103,8 @@ public class MedicalImages implements ModInitializer {
 								for (int l = layer; l < layer + n; l++) {
 									for (int i = 0; i < 512; i++) {
 										for (int j = 0; j < 512; j++) {
-											if (volume.data.get(l, i, j, 0) > 500) {
-												BlockPos bp = new BlockPos((int) (pos.x - i), (int) (pos.y + l - layer), (int) (pos.z - j));
+											if (volume.data.get(l, i, j, 0) > 300) {
+												BlockPos bp = new BlockPos((int) (pos.x - i), (int) (pos.y + layer + n - l), (int) (pos.z - j));
 												world.setBlock(bp, Blocks.BONE_BLOCK.defaultBlockState(), 2);
 												System.out.println("Placed block at " + bp);
 											}
