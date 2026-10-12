@@ -1,39 +1,57 @@
 package suprk.com;
 
+import net.fabricmc.loader.api.FabricLoader;
 import niftijio.NiftiVolume;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.util.Locale;
 
 public class CTLoader {
 
-    public static NiftiVolume load() throws IOException {
+    public static MedicalImage load(String filename) throws IOException {
 
-        try (InputStream resource = CTLoader.class
-                .getClassLoader()
-                .getResourceAsStream("assets/medicalimages/imaging.nii.gz")) {
+        Path directory = FabricLoader.getInstance()
+                .getGameDir()
+                .resolve("medicalimages")
+                .toAbsolutePath()
+                .normalize();
 
-            if (resource == null) {
-                throw new IOException("Could not find imaging.nii.gz");
-            }
+        Files.createDirectories(directory);
 
-            Path tempFile = Files.createTempFile(
-                    "medicalimages_imaging_",
-                    ".nii.gz"
-            );
+        Path path = directory
+                .resolve(filename)
+                .toAbsolutePath()
+                .normalize();
 
-            Files.copy(
-                    resource,
-                    tempFile,
-                    StandardCopyOption.REPLACE_EXISTING
-            );
-
-            tempFile.toFile().deleteOnExit();
-
-            return NiftiVolume.read(tempFile.toString());
+        // zabezpieczenie przed ../../
+        if (!path.startsWith(directory)) {
+            throw new IOException("Invalid path: " + filename);
         }
+
+        if (!Files.exists(path)) {
+            throw new IOException("File or directory not found: " + path);
+        }
+
+        // DICOM series = katalog
+        if (Files.isDirectory(path)) {
+            return new MedicalImage(path);
+        }
+
+        // NIfTI = plik
+        String name = path.getFileName()
+                .toString()
+                .toLowerCase(Locale.ROOT);
+
+        if (name.endsWith(".nii") || name.endsWith(".nii.gz")) {
+            NiftiVolume nifti = NiftiVolume.read(path.toString());
+
+            return new MedicalImage(nifti);
+        }
+
+        throw new IOException(
+                "Unsupported medical image format: " + filename
+        );
     }
 }

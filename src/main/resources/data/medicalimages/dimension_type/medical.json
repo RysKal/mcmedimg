@@ -6,8 +6,8 @@
   "has_ender_dragon_fight": false,
   "has_skylight": true,
 
-  "height": 640,
-  "logical_height": 640,
+  "height": 2032,
+  "logical_height": 2032,
   "min_y": 0,
 
   "infiniburn": "#minecraft:infiniburn_overworld",

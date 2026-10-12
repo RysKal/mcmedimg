@@ -3,9 +3,9 @@
 	"id": "medicalimages",
 	"version": "${version}",
 	"name": "MedicalImages",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "Dynamically load and render 2D and 3D structures from medical images out of blocks",
 	"authors": [
-		"Me!"
+		"SupRK"
 	],
 	"contact": {
 		"homepage": "https://fabricmc.net/",

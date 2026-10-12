@@ -4,11 +4,15 @@ plugins {
 }
 
 repositories {
-	// Add repositories to retrieve artifacts from in here.
-	// You should only use this when depending on other mods because
-	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
-	// for more information about repositories.
+	mavenCentral()
+
+	maven {
+		url = "https://www.dcm4che.org/maven2"
+	}
+
+	maven {
+		url = "https://raw.githubusercontent.com/nroduit/mvn-repo/master/"
+	}
 }
 
 loom {
@@ -33,6 +37,9 @@ dependencies {
 	// NifTI
 	implementation "ch.unibas.cs.gravis:scalismo-niftijiojar:0.1.0"
 	include "ch.unibas.cs.gravis:scalismo-niftijiojar:0.1.0"
+
+	// DICOM
+	implementation "org.dcm4che:dcm4che-imageio:5.35.1"
 }
 
 processResources {
