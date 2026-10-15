@@ -26,12 +26,11 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Stream;
 
+import javax.imageio.ImageIO;
+
 public class MedicalImages implements ModInitializer {
 	public static final String MOD_ID = "medicalimages";
 
-	// This logger is used to write text to the console and the log file.
-	// It is considered best practice to use your mod id as the logger's name.
-	// That way, it's clear which mod wrote info, warnings, and errors.
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	MedicalImage img;
@@ -39,9 +38,20 @@ public class MedicalImages implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
-		// This code runs as soon as Minecraft is in a mod-load-ready state.
-		// However, some things (like resources) may still be uninitialized.
-		// Proceed with mild caution.
+
+		try {
+
+			OpenCvLoader.load();
+
+		} catch (Throwable e) {
+
+			LOGGER.error(
+					"Failed to load OpenCV native library",
+					e
+			);
+		}
+
+		ImageIO.scanForPlugins();
 
 		// Registering command to load image in nifti
 		CommandRegistrationCallback.EVENT.register(
@@ -185,6 +195,47 @@ public class MedicalImages implements ModInitializer {
 																	false
 															);
 
+															if (img.isDicom()) {
+
+																DicomSeriesInfo series =
+																		img.getSelectedDicomSeriesInfo();
+
+																int seriesCount =
+																		img.getDicomSeriesInfos()
+																				.size();
+
+
+																context.getSource().sendSuccess(
+																		() -> Component.literal(
+																				"DICOM series "
+																						+ series.index()
+																						+ "/"
+																						+ seriesCount
+																						+ ": "
+																						+ series.description()
+																						+ " ["
+																						+ series.modality()
+																						+ "]"
+																						+ ", "
+																						+ series.sliceCount()
+																						+ " slices"
+																		),
+																		false
+																);
+
+
+																if (seriesCount > 1) {
+
+																	context.getSource().sendSuccess(
+																			() -> Component.literal(
+																					"Multiple series detected. "
+																							+ "Use /mi_series to list them."
+																			),
+																			false
+																	);
+																}
+															}
+
 														} catch (IOException e) {
 															context.getSource().sendFailure(
 																	Component.literal(
@@ -226,6 +277,39 @@ public class MedicalImages implements ModInitializer {
 									),
 									false
 							);
+
+							if (img.isDicom()) {
+
+								DicomSeriesInfo series =
+										img.getSelectedDicomSeriesInfo();
+
+								context.getSource().sendSuccess(
+										() -> Component.literal(
+												"DICOM series: "
+														+ series.index()
+														+ "/"
+														+ img.getDicomSeriesInfos().size()
+														+ "\n"
+														+ "SeriesNumber: "
+														+ (
+														series.seriesNumber() >= 0
+																? series.seriesNumber()
+																: "?"
+												)
+														+ "\nDescription: "
+														+ series.description()
+														+ "\nModality: "
+														+ series.modality()
+														+ "\nSlices: "
+														+ series.sliceCount()
+														+ "\nResolution: "
+														+ series.columns()
+														+ " x "
+														+ series.rows()
+										),
+										false
+								);
+							}
 						}
 						else {
 							context.getSource().sendSuccess(() -> Component.literal("Nothing is loaded - use /mi_load command."), false);
@@ -235,6 +319,317 @@ public class MedicalImages implements ModInitializer {
 
 					}));
 		});
+
+		CommandRegistrationCallback.EVENT.register(
+				(dispatcher, registryAccess, environment) -> {
+
+					dispatcher.register(
+							Commands.literal("mi_series")
+
+									// If no arguments list series
+									.executes(context -> {
+
+										if (img == null) {
+
+											context.getSource().sendFailure(
+													Component.literal(
+															"Nothing is loaded - use /mi_load."
+													)
+											);
+
+											return 0;
+										}
+
+
+										if (!img.isDicom()) {
+
+											context.getSource().sendFailure(
+													Component.literal(
+															"Loaded image is not DICOM."
+													)
+											);
+
+											return 0;
+										}
+
+
+										List<DicomSeriesInfo> seriesList =
+												img.getDicomSeriesInfos();
+
+
+										context.getSource().sendSuccess(
+												() -> Component.literal(
+														"DICOM series in "
+																+ loaded_filename
+																+ ":"
+												),
+												false
+										);
+
+
+										for (DicomSeriesInfo series : seriesList) {
+
+											String marker =
+													series.selected()
+															? "* "
+															: "  ";
+
+											String seriesNumber =
+													series.seriesNumber() >= 0
+															? Integer.toString(series.seriesNumber())
+															: "?";
+
+											String acquisitionNumber =
+													series.acquisitionNumber() >= 0
+															? Integer.toString(series.acquisitionNumber())
+															: "?";
+
+											String tr =
+													Double.isNaN(series.repetitionTime())
+															? "?"
+															: "%.2f".formatted(
+															series.repetitionTime()
+													);
+
+											String te =
+													Double.isNaN(series.echoTime())
+															? "?"
+															: "%.2f".formatted(
+															series.echoTime()
+													);
+
+											String ti =
+													Double.isNaN(series.inversionTime())
+															? "?"
+															: "%.2f".formatted(
+															series.inversionTime()
+													);
+
+
+											String line1 =
+													marker
+															+ "["
+															+ series.index()
+															+ "] "
+															+ series.description()
+															+ " ["
+															+ series.modality()
+															+ "]";
+
+											String line2 =
+													"    Series="
+															+ seriesNumber
+															+ " | Acquisition="
+															+ acquisitionNumber
+															+ " | "
+															+ series.sliceCount()
+															+ " slices | "
+															+ series.columns()
+															+ "x"
+															+ series.rows();
+
+											String line3 =
+													"    TR="
+															+ tr
+															+ " | TE="
+															+ te
+															+ " | TI="
+															+ ti
+															+ " | UID "
+															+ shortUid(
+															series.uid()
+													);
+
+											String line4 =
+													"    ImageType: "
+															+ series.imageType();
+
+
+											context.getSource().sendSuccess(
+													() -> Component.literal(line1),
+													false
+											);
+
+											context.getSource().sendSuccess(
+													() -> Component.literal(line2),
+													false
+											);
+
+											context.getSource().sendSuccess(
+													() -> Component.literal(line3),
+													false
+											);
+
+											context.getSource().sendSuccess(
+													() -> Component.literal(line4),
+													false
+											);
+										}
+
+										return 1;
+									})
+
+
+									// If argument change selected series
+									.then(
+											Commands.argument(
+															"index",
+															IntegerArgumentType.integer(1)
+													)
+
+													/*
+													 * Podpowiadanie:
+													 *
+													 * 1
+													 * 2
+													 * 3
+													 * ...
+													 */
+													.suggests(
+															(context, builder) -> {
+
+																if (img != null
+																		&& img.isDicom()) {
+
+																	for (
+																			DicomSeriesInfo series :
+																			img.getDicomSeriesInfos()
+																	) {
+
+																		builder.suggest(
+																				series.index()
+																		);
+																	}
+																}
+
+
+																return builder.buildFuture();
+															}
+													)
+
+													.executes(context -> {
+
+														if (img == null
+																|| loaded_filename == null) {
+
+															context.getSource().sendFailure(
+																	Component.literal(
+																			"Nothing is loaded."
+																	)
+															);
+
+															return 0;
+														}
+
+
+														if (!img.isDicom()) {
+
+															context.getSource().sendFailure(
+																	Component.literal(
+																			"Loaded image is not DICOM."
+																	)
+															);
+
+															return 0;
+														}
+
+
+														int index =
+																IntegerArgumentType.getInteger(
+																		context,
+																		"index"
+																);
+
+
+														int seriesCount =
+																img.getDicomSeriesInfos()
+																		.size();
+
+
+														if (index < 1
+																|| index > seriesCount) {
+
+															context.getSource().sendFailure(
+																	Component.literal(
+																			"Series index must be between 1 and "
+																					+ seriesCount
+																	)
+															);
+
+															return 0;
+														}
+
+
+														try {
+
+															img =
+																	CTLoader.load(
+																			loaded_filename,
+																			index
+																	);
+
+
+															DicomSeriesInfo selected =
+																	img.getSelectedDicomSeriesInfo();
+
+
+															context.getSource().sendSuccess(
+																	() -> Component.literal(
+																			"Selected DICOM series "
+																					+ selected.index()
+																					+ "/"
+																					+ img.getDicomSeriesInfos().size()
+																					+ ": "
+																					+ selected.description()
+																					+ " ["
+																					+ selected.modality()
+																					+ "]"
+																					+ ", "
+																					+ selected.sliceCount()
+																					+ " slices"
+																					+ ", "
+																					+ selected.columns()
+																					+ "x"
+																					+ selected.rows()
+																	),
+																	false
+															);
+
+
+															context.getSource().sendSuccess(
+																	() -> Component.literal(
+																			"Image dimensions: "
+																					+ img.sizeX
+																					+ " x "
+																					+ img.sizeY
+																					+ " x "
+																					+ img.sizeZ
+																	),
+																	false
+															);
+
+
+															return 1;
+
+
+														} catch (IOException e) {
+
+															context.getSource().sendFailure(
+																	Component.literal(
+																			"Couldn't load series "
+																					+ index
+																					+ ": "
+																					+ e.getMessage()
+																	)
+															);
+
+															return 0;
+														}
+													})
+									)
+					);
+				}
+		);
 
 		// Registering command to unload
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
@@ -262,7 +657,7 @@ public class MedicalImages implements ModInitializer {
 										builder.suggest("z");
 										return builder.buildFuture();
 									})
-									.then(Commands.argument("layer", IntegerArgumentType.integer())
+									.then(Commands.argument("layer", IntegerArgumentType.integer(1))
 											.then(Commands.argument("value_min", IntegerArgumentType.integer())
 													.then(Commands.argument("value_max", IntegerArgumentType.integer())
 															.then(Commands.argument("block", BlockStateArgument.block(registryAccess))
@@ -282,9 +677,12 @@ public class MedicalImages implements ModInitializer {
 																				.getString(context, "axis")
 																				.toLowerCase();
 
-																		int layer = IntegerArgumentType.getInteger(
-																				context, "layer"
+																		int layerNumber = IntegerArgumentType.getInteger(
+																				context,
+																				"layer"
 																		);
+
+																		int layer = layerNumber - 1;
 
 																		int valueMin = IntegerArgumentType.getInteger(
 																				context, "value_min"
@@ -359,43 +757,92 @@ public class MedicalImages implements ModInitializer {
 																		ServerLevel world =
 																				context.getSource().getLevel();
 
-																		for (int i = 0; i < sizeA; i++) {
-																			for (int j = 0; j < sizeB; j++) {
+																		int blocksPlaced = 0;
 
-																				try {
-																					double value;
+																		try {
 
-																					switch (axis) {
-																						case "x" ->
-																								value = img.get(layer, i, j);
+																			for (int i = 0; i < sizeA; i++) {
+																				for (int j = 0; j < sizeB; j++) {
 
-																						case "y" ->
-																								value = img.get(i, layer, j);
+																					double value =
+																							switch (axis) {
 
-																						case "z" ->
-																								value = img.get(i, j, layer);
+																								case "x" ->
+																										img.get(
+																												layer,
+																												i,
+																												j
+																										);
 
-																						default ->
-																								throw new IllegalStateException();
-																					}
+																								case "y" ->
+																										img.get(
+																												i,
+																												layer,
+																												j
+																										);
+
+																								case "z" ->
+																										img.get(
+																												i,
+																												j,
+																												layer
+																										);
+
+																								default ->
+																										throw new IllegalStateException();
+																							};
 
 																					if (value > valueMin
 																							&& value < valueMax) {
 
-																						BlockPos bp = new BlockPos(
-																								(int) pos.x - i,
-																								(int) pos.y,
-																								(int) pos.z - j
+																						BlockPos bp =
+																								new BlockPos(
+																										(int) pos.x - i,
+																										(int) pos.y,
+																										(int) pos.z - j
+																								);
+
+																						block.place(
+																								world,
+																								bp,
+																								2
 																						);
 
-																						block.place(world, bp, 2);
+																						blocksPlaced++;
 																					}
-
-																				} catch (IOException e) {
-																					throw new RuntimeException(e);
 																				}
 																			}
+
+																		} catch (Exception e) {
+
+																			LOGGER.error(
+																					"Error while placing medical image layer",
+																					e
+																			);
+
+																			context.getSource().sendFailure(
+																					Component.literal(
+																							"Failed: "
+																									+ e.getClass().getSimpleName()
+																									+ ": "
+																									+ e.getMessage()
+																					)
+																			);
+
+																			return 0;
 																		}
+
+																		int finalBlocksPlaced =
+																				blocksPlaced;
+
+																		context.getSource().sendSuccess(
+																				() -> Component.literal(
+																						"Finished. Placed "
+																								+ finalBlocksPlaced
+																								+ " blocks."
+																				),
+																				false
+																		);
 
 																		return 1;
 																	})
@@ -418,7 +865,7 @@ public class MedicalImages implements ModInitializer {
 										builder.suggest("z");
 										return builder.buildFuture();
 									})
-									.then(Commands.argument("start_layer", IntegerArgumentType.integer())
+									.then(Commands.argument("start_layer", IntegerArgumentType.integer(1))
 											.then(Commands.argument("value_min", IntegerArgumentType.integer())
 													.then(Commands.argument("value_max", IntegerArgumentType.integer())
 															.then(Commands.argument("n_layers", IntegerArgumentType.integer())
@@ -440,10 +887,12 @@ public class MedicalImages implements ModInitializer {
 																								.getString(context, "axis")
 																								.toLowerCase();
 
-																						int layer = IntegerArgumentType.getInteger(
+																						int layerNumber = IntegerArgumentType.getInteger(
 																								context,
 																								"start_layer"
 																						);
+
+																						int layer = layerNumber - 1;
 
 																						int valueMin = IntegerArgumentType.getInteger(
 																								context,
@@ -470,7 +919,7 @@ public class MedicalImages implements ModInitializer {
 																								"upwards"
 																						);
 
-																						// Rozmiar osi warstw oraz dwóch osi przekroju
+																						// Size of layers & axis
 																						int layerCount;
 																						int sizeA;
 																						int sizeB;
@@ -504,86 +953,162 @@ public class MedicalImages implements ModInitializer {
 																							}
 																						}
 
-																						if (layer < 0 || layer + n > layerCount) {
+																						if (n <= 0) {
+
+																							context.getSource().sendFailure(
+																									Component.literal(
+																											"n_layers must be greater than 0."
+																									)
+																							);
+
+																							return 0;
+																						}
+
+																						if (layer < 0
+																								|| layer + n > layerCount) {
+
 																							context.getSource().sendFailure(
 																									Component.literal(
 																											"Requested layers exceed image bounds. "
-																													+ "Axis " + axis
-																													+ " has " + layerCount
+																													+ "Axis "
+																													+ axis
+																													+ " has "
+																													+ layerCount
 																													+ " layers."
 																									)
 																							);
+
 																							return 0;
 																						}
 
 																						context.getSource().sendSuccess(
 																								() -> Component.literal(
-																										"Placing %d layers from %d along %s axis."
-																												.formatted(n, layer, axis)
+																										"Placing "
+																												+ n
+																												+ " layers from "
+																												+ layerNumber
+																												+ " along "
+																												+ axis
+																												+ " axis."
 																								),
 																								false
 																						);
 
-																						Vec3 pos = Objects.requireNonNull(
-																								context.getSource().getPlayer()
-																						).position();
+																						BlockPos playerPos =
+																								Objects.requireNonNull(
+																										context.getSource().getPlayer()
+																								).blockPosition();
 
 																						ServerLevel world =
 																								context.getSource().getLevel();
 
-																						for (int l = layer; l < layer + n; l++) {
+																						int baseY =
+																								playerPos.getY();
 
-																							int offset = l - layer;
+																						int totalBlocks =
+																								0;
 
-																							int worldY = upwards
-																									? (int) pos.y + offset
-																									: (int) pos.y - offset;
+																						try {
 
-																							for (int i = 0; i < sizeA; i++) {
-																								for (int j = 0; j < sizeB; j++) {
+																							for (int offset = 0;
+																							     offset < n;
+																							     offset++) {
 
-																									try {
-																										double value;
+																								int worldY =
+																										baseY + offset;
 
-																										switch (axis) {
-																											case "x" ->
-																													value = img.get(l, i, j);
+																								int sourceLayer =
+																										upwards
+																												? layer + offset
+																												: layer + (n - 1 - offset);
 
-																											case "y" ->
-																													value = img.get(i, l, j);
+																								for (int i = 0;
+																								     i < sizeA;
+																								     i++) {
 
-																											case "z" ->
-																													value = img.get(i, j, l);
+																									for (int j = 0;
+																									     j < sizeB;
+																									     j++) {
 
-																											default ->
-																													throw new IllegalStateException();
-																										}
+																										double value =
+																												switch (axis) {
+
+																													case "x" ->
+																															img.get(
+																																	sourceLayer,
+																																	i,
+																																	j
+																															);
+
+																													case "y" ->
+																															img.get(
+																																	i,
+																																	sourceLayer,
+																																	j
+																															);
+
+																													case "z" ->
+																															img.get(
+																																	i,
+																																	j,
+																																	sourceLayer
+																															);
+
+																													default ->
+																															throw new IllegalStateException();
+																												};
 
 																										if (value > valueMin
 																												&& value < valueMax) {
 
-																											BlockPos bp = new BlockPos(
-																													(int) pos.x - i,
-																													worldY,
-																													(int) pos.z - j
+																											BlockPos bp =
+																													new BlockPos(
+																															playerPos.getX() - i,
+																															worldY,
+																															playerPos.getZ() - j
+																													);
+
+																											block.place(
+																													world,
+																													bp,
+																													2
 																											);
 
-																											block.place(world, bp, 2);
+																											totalBlocks++;
 																										}
-
-																									} catch (IOException e) {
-																										throw new RuntimeException(e);
 																									}
 																								}
 																							}
+
+																						} catch (Exception e) {
+
+																							LOGGER.error(
+																									"Error while placing medical image layers",
+																									e
+																							);
+
+																							context.getSource().sendFailure(
+																									Component.literal(
+																											"Failed: "
+																													+ e.getClass().getSimpleName()
+																													+ ": "
+																													+ e.getMessage()
+																									)
+																							);
+
+																							return 0;
 																						}
 
-																						Objects.requireNonNull(
-																								context.getSource().getPlayer()
-																						).sendSystemMessage(
-																								Component.literal(
-																										"Finished placing blocks"
-																								)
+																						int finalTotalBlocks =
+																								totalBlocks;
+
+																						context.getSource().sendSuccess(
+																								() -> Component.literal(
+																										"Finished. Placed "
+																												+ finalTotalBlocks
+																												+ " blocks."
+																								),
+																								false
 																						);
 
 																						return 1;
@@ -639,13 +1164,52 @@ public class MedicalImages implements ModInitializer {
 										builder.suggest("z");
 										return builder.buildFuture();
 									})
-									.then(Commands.argument("layer", IntegerArgumentType.integer())
-											.then(Commands.argument("value_min", IntegerArgumentType.integer())
-													.then(Commands.argument("value_max", IntegerArgumentType.integer())
+
+									.then(Commands.argument(
+													"layer",
+													IntegerArgumentType.integer(1)
+											)
+
+											.then(Commands.argument(
+															"value_min",
+															IntegerArgumentType.integer()
+													)
+
+													.then(Commands.argument(
+																	"value_max",
+																	IntegerArgumentType.integer()
+															)
+
 															.then(Commands.argument(
-																	"block",
-																	BlockStateArgument.block(registryAccess)
-															).executes(context -> {
+																			"selection",
+																			StringArgumentType.word()
+																	)
+																	.suggests((context, builder) -> {
+																		builder.suggest("center");
+																		builder.suggest("largest");
+																		builder.suggest("largest_near_center");
+																		return builder.buildFuture();
+																	})
+
+																	.then(Commands.argument(
+																					"connectivity",
+																					IntegerArgumentType.integer(4, 8)
+																			)
+
+																			.then(Commands.argument(
+																							"min_size",
+																							IntegerArgumentType.integer(1)
+																					)
+
+																					.then(Commands.argument(
+																									"center_radius",
+																									IntegerArgumentType.integer(0)
+																							)
+
+																							.then(Commands.argument(
+																									"block",
+																									BlockStateArgument.block(registryAccess)
+																							).executes(context -> {
 
 																if (img == null) {
 																	context.getSource().sendFailure(
@@ -660,9 +1224,12 @@ public class MedicalImages implements ModInitializer {
 																		.getString(context, "axis")
 																		.toLowerCase();
 
-																int layer = IntegerArgumentType.getInteger(
-																		context, "layer"
+																int layerNumber = IntegerArgumentType.getInteger(
+																		context,
+																		"layer"
 																);
+
+																int layer = layerNumber - 1;
 
 																int valueMin = IntegerArgumentType.getInteger(
 																		context, "value_min"
@@ -675,6 +1242,57 @@ public class MedicalImages implements ModInitializer {
 																BlockInput block = BlockStateArgument.getBlock(
 																		context, "block"
 																);
+
+																String selection =
+																		StringArgumentType.getString(
+																				context,
+																				"selection"
+																		).toLowerCase();
+
+																int connectivity =
+																		IntegerArgumentType.getInteger(
+																				context,
+																				"connectivity"
+																		);
+
+																int minSize =
+																		IntegerArgumentType.getInteger(
+																				context,
+																				"min_size"
+																		);
+
+																int centerRadius =
+																		IntegerArgumentType.getInteger(
+																				context,
+																				"center_radius"
+																		);
+
+																// Checking arguments
+
+																if (connectivity != 4
+																		&& connectivity != 8) {
+
+																	context.getSource().sendFailure(
+																			Component.literal(
+																					"Connectivity must be 4 or 8."
+																			)
+																	);
+
+																	return 0;
+																}
+
+																if (!selection.equals("center")
+																		&& !selection.equals("largest")
+																		&& !selection.equals("largest_near_center")) {
+
+																	context.getSource().sendFailure(
+																			Component.literal(
+																					"Selection must be center, largest or largest_near_center."
+																			)
+																	);
+
+																	return 0;
+																}
 
 																int layerCount;
 																int sizeA;
@@ -747,9 +1365,15 @@ public class MedicalImages implements ModInitializer {
 																		}
 																	}
 
-																	// 2. Znajdź centralną składową
+																	// 2. Central component
 																	boolean[][] central =
-																			findCentralComponent(mask);
+																			findCentralComponent(
+																					mask,
+																					selection,
+																					connectivity,
+																					minSize,
+																					centerRadius
+																			);
 
 																	Vec3 pos = Objects.requireNonNull(
 																			context.getSource().getPlayer()
@@ -760,7 +1384,7 @@ public class MedicalImages implements ModInitializer {
 
 																	int blocksPlaced = 0;
 
-																	// 3. Postaw tylko centralną składową
+																	// 3. Only central
 																	for (int i = 0; i < sizeA; i++) {
 																		for (int j = 0; j < sizeB; j++) {
 
@@ -800,13 +1424,532 @@ public class MedicalImages implements ModInitializer {
 											)
 									)
 							)
-			);
+													)))));
 		});
+
+		CommandRegistrationCallback.EVENT.register(
+				(dispatcher, registryAccess, environment) -> {
+
+					dispatcher.register(
+							Commands.literal("mi_layers_central")
+
+									.then(Commands.argument(
+															"axis",
+															StringArgumentType.word()
+													)
+													.suggests((context, builder) -> {
+
+														builder.suggest("x");
+														builder.suggest("y");
+														builder.suggest("z");
+
+														return builder.buildFuture();
+													})
+
+													.then(Commands.argument(
+																			"start_layer",
+																			IntegerArgumentType.integer(1)
+																	)
+
+																	.then(Commands.argument(
+																							"value_min",
+																							IntegerArgumentType.integer()
+																					)
+
+																					.then(Commands.argument(
+																											"value_max",
+																											IntegerArgumentType.integer()
+																									)
+
+																									.then(Commands.argument(
+																															"n_layers",
+																															IntegerArgumentType.integer(1)
+																													)
+
+																													.then(Commands.argument(
+																																			"selection",
+																																			StringArgumentType.word()
+																																	)
+																																	.suggests((context, builder) -> {
+
+																																		builder.suggest("center");
+																																		builder.suggest("largest");
+																																		builder.suggest("largest_near_center");
+
+																																		return builder.buildFuture();
+																																	})
+
+																																	.then(Commands.argument(
+																																							"connectivity",
+																																							IntegerArgumentType.integer(4, 8)
+																																					)
+
+																																					.then(Commands.argument(
+																																											"min_size",
+																																											IntegerArgumentType.integer(1)
+																																									)
+
+																																									.then(Commands.argument(
+																																															"center_radius",
+																																															IntegerArgumentType.integer(0)
+																																													)
+
+																																													.then(Commands.argument(
+																																																			"block",
+																																																			BlockStateArgument.block(registryAccess)
+																																																	)
+
+																																																	.then(Commands.argument(
+																																																							"upwards",
+																																																							BoolArgumentType.bool()
+																																																					)
+
+																																																					.executes(context -> {
+
+																																																						if (img == null) {
+
+																																																							context.getSource().sendFailure(
+																																																									Component.literal(
+																																																											"Nothing is loaded - use /mi_load."
+																																																									)
+																																																							);
+
+																																																							return 0;
+																																																						}
+
+																																																						// ARGUMENTS
+
+																																																						String axis =
+																																																								StringArgumentType
+																																																										.getString(context, "axis")
+																																																										.toLowerCase();
+
+
+																																																						int layerNumber =
+																																																								IntegerArgumentType.getInteger(
+																																																										context,
+																																																										"start_layer"
+																																																								);
+
+																																																						// user starts from 1, code from 0
+																																																						int startLayer =
+																																																								layerNumber - 1;
+
+
+																																																						int valueMin =
+																																																								IntegerArgumentType.getInteger(
+																																																										context,
+																																																										"value_min"
+																																																								);
+
+																																																						int valueMax =
+																																																								IntegerArgumentType.getInteger(
+																																																										context,
+																																																										"value_max"
+																																																								);
+
+																																																						int n =
+																																																								IntegerArgumentType.getInteger(
+																																																										context,
+																																																										"n_layers"
+																																																								);
+
+
+																																																						String selection =
+																																																								StringArgumentType
+																																																										.getString(
+																																																												context,
+																																																												"selection"
+																																																										)
+																																																										.toLowerCase();
+
+
+																																																						int connectivity =
+																																																								IntegerArgumentType.getInteger(
+																																																										context,
+																																																										"connectivity"
+																																																								);
+
+
+																																																						int minSize =
+																																																								IntegerArgumentType.getInteger(
+																																																										context,
+																																																										"min_size"
+																																																								);
+
+
+																																																						int centerRadius =
+																																																								IntegerArgumentType.getInteger(
+																																																										context,
+																																																										"center_radius"
+																																																								);
+
+
+																																																						BlockInput block =
+																																																								BlockStateArgument.getBlock(
+																																																										context,
+																																																										"block"
+																																																								);
+
+
+																																																						boolean upwards =
+																																																								BoolArgumentType.getBool(
+																																																										context,
+																																																										"upwards"
+																																																								);
+
+																																																						// VALIDATION
+
+																																																						if (connectivity != 4
+																																																								&& connectivity != 8) {
+
+																																																							context.getSource().sendFailure(
+																																																									Component.literal(
+																																																											"Connectivity must be 4 or 8."
+																																																									)
+																																																							);
+
+																																																							return 0;
+																																																						}
+
+																																																						if (!selection.equals("center")
+																																																								&& !selection.equals("largest")
+																																																								&& !selection.equals("largest_near_center")) {
+
+																																																							context.getSource().sendFailure(
+																																																									Component.literal(
+																																																											"Selection must be center, largest or largest_near_center."
+																																																									)
+																																																							);
+
+																																																							return 0;
+																																																						}
+
+																																																						// IMAGE DIMENSIONS
+
+																																																						int layerCount;
+																																																						int sizeA;
+																																																						int sizeB;
+
+																																																						switch (axis) {
+
+																																																							case "x" -> {
+
+																																																								layerCount =
+																																																										img.sizeX;
+
+																																																								sizeA =
+																																																										img.sizeY;
+
+																																																								sizeB =
+																																																										img.sizeZ;
+																																																							}
+
+
+																																																							case "y" -> {
+
+																																																								layerCount =
+																																																										img.sizeY;
+
+																																																								sizeA =
+																																																										img.sizeX;
+
+																																																								sizeB =
+																																																										img.sizeZ;
+																																																							}
+
+
+																																																							case "z" -> {
+
+																																																								layerCount =
+																																																										img.sizeZ;
+
+																																																								sizeA =
+																																																										img.sizeX;
+
+																																																								sizeB =
+																																																										img.sizeY;
+																																																							}
+
+
+																																																							default -> {
+
+																																																								context.getSource().sendFailure(
+																																																										Component.literal(
+																																																												"Invalid axis. Use x, y or z."
+																																																										)
+																																																								);
+
+																																																								return 0;
+																																																							}
+																																																						}
+
+																																																						if (startLayer < 0
+																																																								|| startLayer + n > layerCount) {
+
+																																																							context.getSource().sendFailure(
+																																																									Component.literal(
+																																																											"Requested layers exceed image bounds. "
+																																																													+ "Axis "
+																																																													+ axis
+																																																													+ " has "
+																																																													+ layerCount
+																																																													+ " layers."
+																																																									)
+																																																							);
+
+																																																							return 0;
+																																																						}
+
+
+																																																						context.getSource().sendSuccess(
+																																																								() -> Component.literal(
+																																																										"Processing "
+																																																												+ n
+																																																												+ " layers from "
+																																																												+ layerNumber
+																																																												+ " along "
+																																																												+ axis
+																																																												+ " axis."
+																																																								),
+																																																								false
+																																																						);
+
+																																																						// WORLD
+
+																																																						BlockPos playerPos =
+																																																								Objects.requireNonNull(
+																																																										context.getSource()
+																																																												.getPlayer()
+																																																								).blockPosition();
+
+
+																																																						ServerLevel world =
+																																																								context.getSource()
+																																																										.getLevel();
+
+
+																																																						int baseY =
+																																																								playerPos.getY();
+
+
+																																																						int totalBlocks =
+																																																								0;
+
+																																																						// PROCESS LAYERS
+
+																																																						try {
+
+																																																							for (
+																																																									int offset = 0;
+																																																									offset < n;
+																																																									offset++
+																																																							) {
+
+																																																								int worldY =
+																																																										baseY + offset;
+
+																																																								// upwards changes starting end
+																																																								int sourceLayer =
+																																																										upwards
+																																																												? startLayer + offset
+																																																												: startLayer + (n - 1 - offset);
+
+																																																								// 1. THRESHOLD
+
+																																																								boolean[][] mask =
+																																																										new boolean[sizeA][sizeB];
+
+
+																																																								for (
+																																																										int i = 0;
+																																																										i < sizeA;
+																																																										i++
+																																																								) {
+
+																																																									for (
+																																																											int j = 0;
+																																																											j < sizeB;
+																																																											j++
+																																																									) {
+
+
+																																																										double value =
+																																																												switch (axis) {
+
+																																																													case "x" ->
+																																																															img.get(
+																																																																	sourceLayer,
+																																																																	i,
+																																																																	j
+																																																															);
+
+																																																													case "y" ->
+																																																															img.get(
+																																																																	i,
+																																																																	sourceLayer,
+																																																																	j
+																																																															);
+
+																																																													case "z" ->
+																																																															img.get(
+																																																																	i,
+																																																																	j,
+																																																																	sourceLayer
+																																																															);
+
+																																																													default ->
+																																																															throw new IllegalStateException();
+																																																												};
+
+
+																																																										mask[i][j] =
+																																																												value > valueMin
+																																																														&& value < valueMax;
+																																																									}
+																																																								}
+
+																																																								// 2. COMPONENT
+
+																																																								boolean[][] central =
+																																																										findCentralComponent(
+																																																												mask,
+																																																												selection,
+																																																												connectivity,
+																																																												minSize,
+																																																												centerRadius
+																																																										);
+
+																																																								// 3. PLACE
+
+																																																								int blocksThisLayer =
+																																																										0;
+
+
+																																																								for (
+																																																										int i = 0;
+																																																										i < sizeA;
+																																																										i++
+																																																								) {
+
+																																																									for (
+																																																											int j = 0;
+																																																											j < sizeB;
+																																																											j++
+																																																									) {
+
+
+																																																										if (!central[i][j]) {
+																																																											continue;
+																																																										}
+
+
+																																																										BlockPos bp =
+																																																												new BlockPos(
+																																																														playerPos.getX() - i,
+																																																														worldY,
+																																																														playerPos.getZ() - j
+																																																												);
+
+
+																																																										block.place(
+																																																												world,
+																																																												bp,
+																																																												2
+																																																										);
+
+
+																																																										blocksThisLayer++;
+																																																									}
+																																																								}
+
+
+																																																								totalBlocks +=
+																																																										blocksThisLayer;
+
+
+																																																								int displayLayer =
+																																																										sourceLayer + 1;
+
+
+																																																								int finalBlocksThisLayer =
+																																																										blocksThisLayer;
+
+
+																																																								context.getSource().sendSuccess(
+																																																										() -> Component.literal(
+																																																												"Layer "
+																																																														+ displayLayer
+																																																														+ ": "
+																																																														+ finalBlocksThisLayer
+																																																														+ " blocks."
+																																																										),
+																																																										false
+																																																								);
+																																																							}
+
+
+																																																						} catch (Exception e) {
+
+																																																							LOGGER.error(
+																																																									"Error while processing central-component layers",
+																																																									e
+																																																							);
+
+
+																																																							context.getSource().sendFailure(
+																																																									Component.literal(
+																																																											"Failed: "
+																																																													+ e.getClass()
+																																																													.getSimpleName()
+																																																													+ ": "
+																																																													+ e.getMessage()
+																																																									)
+																																																							);
+
+
+																																																							return 0;
+																																																						}
+
+																																																						// FINISHED
+
+																																																						int finalTotalBlocks =
+																																																								totalBlocks;
+
+
+																																																						context.getSource().sendSuccess(
+																																																								() -> Component.literal(
+																																																										"Finished. Placed "
+																																																												+ finalTotalBlocks
+																																																												+ " blocks in "
+																																																												+ n
+																																																												+ " layers."
+																																																								),
+																																																								false
+																																																						);
+
+
+																																																						return 1;
+																																																					})
+
+																																																	)
+																																													)
+																																									)
+																																					)
+																																	)
+																													)
+																									)
+																					)
+																	)
+													)
+									));
+				}
+		);
 
 		// Command that can auto-color
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
 			dispatcher.register(
-					Commands.literal("mi_layer_auto_color")
+					Commands.literal("mi_layers_auto_color")
 							.then(Commands.argument("axis", StringArgumentType.word())
 									.suggests((context, builder) -> {
 										builder.suggest("x");
@@ -814,152 +1957,282 @@ public class MedicalImages implements ModInitializer {
 										builder.suggest("z");
 										return builder.buildFuture();
 									})
-									.then(Commands.argument("layer", IntegerArgumentType.integer())
-											.then(Commands.argument("value_min", IntegerArgumentType.integer())
-													.then(Commands.argument("value_max", IntegerArgumentType.integer())
-															.then(Commands.argument("n_colors", IntegerArgumentType.integer(2,7))
-																	.executes(context -> {
-
-																		if (img == null) {
-																			context.getSource().sendSuccess(
-																					() -> Component.literal(
-																							"Nothing is loaded - use /mi_load command"
-																					),
-																					false
-																			);
-																			return 1;
-																		}
-
-																		String axis = StringArgumentType
-																				.getString(context, "axis")
-																				.toLowerCase();
-
-																		int layer = IntegerArgumentType.getInteger(
-																				context, "layer"
-																		);
-
-																		int valueMin = IntegerArgumentType.getInteger(
-																				context, "value_min"
-																		);
-
-																		int valueMax = IntegerArgumentType.getInteger(
-																				context, "value_max"
-																		);
-
-																		int n_colors = IntegerArgumentType.getInteger(
-																				context, "n_colors"
-																		);
-
-																		int layerCount;
-																		int sizeA;
-																		int sizeB;
-
-																		switch (axis) {
-																			case "x" -> {
-																				layerCount = img.sizeX;
-																				sizeA = img.sizeY;
-																				sizeB = img.sizeZ;
-																			}
-
-																			case "y" -> {
-																				layerCount = img.sizeY;
-																				sizeA = img.sizeX;
-																				sizeB = img.sizeZ;
-																			}
-
-																			case "z" -> {
-																				layerCount = img.sizeZ;
-																				sizeA = img.sizeX;
-																				sizeB = img.sizeY;
-																			}
-
-																			default -> {
-																				context.getSource().sendFailure(
-																						Component.literal(
-																								"Invalid axis. Use x, y or z."
-																						)
-																				);
-																				return 0;
-																			}
-																		}
-
-																		if (layer < 0 || layer >= layerCount) {
-																			context.getSource().sendFailure(
-																					Component.literal(
-																							"Layer out of bounds. Axis "
-																									+ axis
-																									+ " has "
-																									+ layerCount
-																									+ " layers."
-																					)
-																			);
-																			return 0;
-																		}
-
-																		context.getSource().sendSuccess(
-																				() -> Component.literal(
-																						"Placing layer %d along %s axis."
-																								.formatted(layer, axis)
-																				),
-																				false
-																		);
-
-																		Vec3 pos = Objects.requireNonNull(
-																				context.getSource().getPlayer()
-																		).position();
-
-																		ServerLevel world =
-																				context.getSource().getLevel();
-
-																		for (int i = 0; i < sizeA; i++) {
-																			for (int j = 0; j < sizeB; j++) {
-
-																				try {
-																					double value;
-
-																					switch (axis) {
-																						case "x" ->
-																								value = img.get(layer, i, j);
-
-																						case "y" ->
-																								value = img.get(i, layer, j);
-
-																						case "z" ->
-																								value = img.get(i, j, layer);
-
-																						default ->
-																								throw new IllegalStateException();
-																					}
-
-																					if (value > valueMin
-																							&& value < valueMax) {
-
-																						BlockPos bp = new BlockPos(
-																								(int) pos.x - i,
-																								(int) pos.y,
-																								(int) pos.z - j
-																						);
-
-																						Block block = getScaleColorBlock(valueMin, valueMax, value, n_colors);
-
-																						world.setBlock(
-																								bp,
-																								block.defaultBlockState(),
-																								2
-																						);
-																					}
-
-																				} catch (IOException e) {
-																					throw new RuntimeException(e);
-																				}
-																			}
-																		}
-
-																		return 1;
-																	})
-															)
+									.then(Commands.argument(
+															"start_layer",
+															IntegerArgumentType.integer(1)
 													)
-											)
+													.then(Commands.argument(
+																			"value_min",
+																			IntegerArgumentType.integer()
+																	)
+																	.then(Commands.argument(
+																							"value_max",
+																							IntegerArgumentType.integer()
+																					)
+																					.then(Commands.argument(
+																											"n_layers",
+																											IntegerArgumentType.integer(1)
+																									)
+																									.then(Commands.argument(
+																															"n_colors",
+																															IntegerArgumentType.integer(2, 7)
+																													)
+																													.then(Commands.argument(
+																																			"upwards",
+																																			BoolArgumentType.bool()
+																																	)
+																																	.executes(context -> {
+
+																																		if (img == null) {
+																																			context.getSource().sendFailure(
+																																					Component.literal(
+																																							"Nothing is loaded - use /mi_load command"
+																																					)
+																																			);
+																																			return 0;
+																																		}
+
+																																		String axis =
+																																				StringArgumentType
+																																						.getString(context, "axis")
+																																						.toLowerCase();
+
+																																		int layerNumber =
+																																				IntegerArgumentType.getInteger(
+																																						context,
+																																						"start_layer"
+																																				);
+
+																																		int layer =
+																																				layerNumber - 1;
+
+																																		int valueMin =
+																																				IntegerArgumentType.getInteger(
+																																						context,
+																																						"value_min"
+																																				);
+
+																																		int valueMax =
+																																				IntegerArgumentType.getInteger(
+																																						context,
+																																						"value_max"
+																																				);
+
+																																		int n =
+																																				IntegerArgumentType.getInteger(
+																																						context,
+																																						"n_layers"
+																																				);
+
+																																		int nColors =
+																																				IntegerArgumentType.getInteger(
+																																						context,
+																																						"n_colors"
+																																				);
+
+																																		boolean upwards =
+																																				BoolArgumentType.getBool(
+																																						context,
+																																						"upwards"
+																																				);
+
+																																		int layerCount;
+																																		int sizeA;
+																																		int sizeB;
+
+																																		switch (axis) {
+
+																																			case "x" -> {
+																																				layerCount = img.sizeX;
+																																				sizeA = img.sizeY;
+																																				sizeB = img.sizeZ;
+																																			}
+
+																																			case "y" -> {
+																																				layerCount = img.sizeY;
+																																				sizeA = img.sizeX;
+																																				sizeB = img.sizeZ;
+																																			}
+
+																																			case "z" -> {
+																																				layerCount = img.sizeZ;
+																																				sizeA = img.sizeX;
+																																				sizeB = img.sizeY;
+																																			}
+
+																																			default -> {
+																																				context.getSource().sendFailure(
+																																						Component.literal(
+																																								"Invalid axis. Use x, y or z."
+																																						)
+																																				);
+																																				return 0;
+																																			}
+																																		}
+
+																																		if (layer < 0
+																																				|| layer + n > layerCount) {
+
+																																			context.getSource().sendFailure(
+																																					Component.literal(
+																																							"Requested layers exceed image bounds. "
+																																									+ "Axis "
+																																									+ axis
+																																									+ " has "
+																																									+ layerCount
+																																									+ " layers."
+																																					)
+																																			);
+
+																																			return 0;
+																																		}
+
+																																		context.getSource().sendSuccess(
+																																				() -> Component.literal(
+																																						"Placing "
+																																								+ n
+																																								+ " layers from "
+																																								+ layerNumber
+																																								+ " along "
+																																								+ axis
+																																								+ " axis."
+																																				),
+																																				false
+																																		);
+
+																																		BlockPos playerPos =
+																																				Objects.requireNonNull(
+																																						context.getSource()
+																																								.getPlayer()
+																																				).blockPosition();
+
+																																		ServerLevel world =
+																																				context.getSource()
+																																						.getLevel();
+
+																																		int baseY =
+																																				playerPos.getY();
+
+																																		int blocksPlaced = 0;
+
+																																		try {
+
+																																			for (int offset = 0;
+																																			     offset < n;
+																																			     offset++) {
+
+																																				int worldY =
+																																						baseY + offset;
+
+																																				int sourceLayer =
+																																						upwards
+																																								? layer + offset
+																																								: layer + (n - 1 - offset);
+
+																																				for (int i = 0;
+																																				     i < sizeA;
+																																				     i++) {
+
+																																					for (int j = 0;
+																																					     j < sizeB;
+																																					     j++) {
+
+																																						double value =
+																																								switch (axis) {
+
+																																									case "x" ->
+																																											img.get(
+																																													sourceLayer,
+																																													i,
+																																													j
+																																											);
+
+																																									case "y" ->
+																																											img.get(
+																																													i,
+																																													sourceLayer,
+																																													j
+																																											);
+
+																																									case "z" ->
+																																											img.get(
+																																													i,
+																																													j,
+																																													sourceLayer
+																																											);
+
+																																									default ->
+																																											throw new IllegalStateException();
+																																								};
+
+																																						if (value > valueMin
+																																								&& value < valueMax) {
+
+																																							BlockPos bp =
+																																									new BlockPos(
+																																											playerPos.getX() - i,
+																																											worldY,
+																																											playerPos.getZ() - j
+																																									);
+
+																																							Block block =
+																																									getScaleColorBlock(
+																																											valueMin,
+																																											valueMax,
+																																											value,
+																																											nColors
+																																									);
+
+																																							world.setBlock(
+																																									bp,
+																																									block.defaultBlockState(),
+																																									2
+																																							);
+
+																																							blocksPlaced++;
+																																						}
+																																					}
+																																				}
+																																			}
+
+																																		} catch (Exception e) {
+
+																																			LOGGER.error(
+																																					"Error while placing auto-colored medical image layers",
+																																					e
+																																			);
+
+																																			context.getSource().sendFailure(
+																																					Component.literal(
+																																							"Failed: "
+																																									+ e.getClass().getSimpleName()
+																																									+ ": "
+																																									+ e.getMessage()
+																																					)
+																																			);
+
+																																			return 0;
+																																		}
+
+																																		int finalBlocksPlaced =
+																																				blocksPlaced;
+
+																																		context.getSource().sendSuccess(
+																																				() -> Component.literal(
+																																						"Finished. Placed "
+																																								+ finalBlocksPlaced
+																																								+ " blocks."
+																																				),
+																																				false
+																																		);
+
+																																		return 1;
+																																	})
+																													)
+																									)
+																					)
+																	)
+													)
 									)
 							)
 			);
@@ -976,7 +2249,7 @@ public class MedicalImages implements ModInitializer {
 										builder.suggest("z");
 										return builder.buildFuture();
 									})
-									.then(Commands.argument("start_layer", IntegerArgumentType.integer())
+									.then(Commands.argument("start_layer", IntegerArgumentType.integer(1))
 											.then(Commands.argument("value_min", IntegerArgumentType.integer())
 													.then(Commands.argument("value_max", IntegerArgumentType.integer())
 															.then(Commands.argument("n_layers", IntegerArgumentType.integer())
@@ -998,10 +2271,12 @@ public class MedicalImages implements ModInitializer {
 																								.getString(context, "axis")
 																								.toLowerCase();
 
-																						int layer = IntegerArgumentType.getInteger(
+																						int layerNumber = IntegerArgumentType.getInteger(
 																								context,
 																								"start_layer"
 																						);
+
+																						int layer = layerNumber - 1;
 
 																						int valueMin = IntegerArgumentType.getInteger(
 																								context,
@@ -1027,7 +2302,6 @@ public class MedicalImages implements ModInitializer {
 																								"upwards"
 																						);
 
-																						// Rozmiar osi warstw oraz dwóch osi przekroju
 																						int layerCount;
 																						int sizeA;
 																						int sizeB;
@@ -1076,7 +2350,7 @@ public class MedicalImages implements ModInitializer {
 																						context.getSource().sendSuccess(
 																								() -> Component.literal(
 																										"Placing %d layers from %d along %s axis."
-																												.formatted(n, layer, axis)
+																												.formatted(n, layerNumber, axis)
 																								),
 																								false
 																						);
@@ -1174,6 +2448,7 @@ public class MedicalImages implements ModInitializer {
 			Blocks.CONCRETE.black()
 	};
 
+	// Function to return block for auto-color methods
 	private static Block getScaleColorBlock(
 			int min,
 			int max,
@@ -1187,7 +2462,6 @@ public class MedicalImages implements ModInitializer {
 
 		normalized = Math.clamp(normalized, 0.0, 1.0);
 
-		// przedział 0 ... nColors-1
 		int colorStep = (int) Math.floor(
 				normalized * nColors
 		);
@@ -1196,7 +2470,6 @@ public class MedicalImages implements ModInitializer {
 			colorStep = nColors - 1;
 		}
 
-		// mapowanie np. 3 kolorów na indeksy 0, 3, 6
 		int paletteIndex = (int) Math.round(
 				colorStep * 6.0 / (nColors - 1)
 		);
@@ -1204,98 +2477,280 @@ public class MedicalImages implements ModInitializer {
 		return HEAT_SCALE[paletteIndex];
 	}
 
-	private static boolean[][] findCentralComponent(boolean[][] mask) {
+	private static boolean[][] findCentralComponent(
+			boolean[][] mask,
+			String selection,
+			int connectivity,
+			int minSize,
+			int centerRadius
+	) {
 
-		int width = mask.length;
-		int height = mask[0].length;
+		int width =
+				mask.length;
 
-		boolean[][] visited = new boolean[width][height];
+		int height =
+				mask[0].length;
 
-		double centerX = (width - 1) / 2.0;
-		double centerY = (height - 1) / 2.0;
+		boolean[][] visited =
+				new boolean[width][height];
 
-		List<int[]> bestComponent = null;
-		double bestDistance = Double.POSITIVE_INFINITY;
+		double centerX =
+				(width - 1) / 2.0;
 
-		int[][] directions = {
-				{-1, -1}, {-1, 0}, {-1, 1},
-				{ 0, -1},          { 0, 1},
-				{ 1, -1}, { 1, 0}, { 1, 1}
+		double centerY =
+				(height - 1) / 2.0;
+
+
+		int[][] directions4 = {
+				{-1, 0},
+				{1, 0},
+				{0, -1},
+				{0, 1}
 		};
 
-		for (int x = 0; x < width; x++) {
-			for (int y = 0; y < height; y++) {
+		int[][] directions8 = {
+				{-1, -1},
+				{-1, 0},
+				{-1, 1},
 
-				if (!mask[x][y] || visited[x][y]) {
+				{0, -1},
+				{0, 1},
+
+				{1, -1},
+				{1, 0},
+				{1, 1}
+		};
+
+		int[][] directions =
+				connectivity == 4
+						? directions4
+						: directions8;
+
+
+		List<int[]> bestComponent =
+				null;
+
+		double bestDistance =
+				Double.POSITIVE_INFINITY;
+
+		int bestSize =
+				-1;
+
+
+		double maximumCenterDistanceSquared =
+				centerRadius * centerRadius;
+
+
+		for (int x = 0;
+		     x < width;
+		     x++) {
+
+			for (int y = 0;
+			     y < height;
+			     y++) {
+
+
+				if (!mask[x][y]
+						|| visited[x][y]) {
+
 					continue;
 				}
 
-				List<int[]> component = new ArrayList<>();
-				ArrayDeque<int[]> queue = new ArrayDeque<>();
 
-				queue.add(new int[]{x, y});
-				visited[x][y] = true;
+				List<int[]> component =
+						new ArrayList<>();
+
+				ArrayDeque<int[]> queue =
+						new ArrayDeque<>();
+
+
+				queue.addLast(
+						new int[]{x, y}
+				);
+
+				visited[x][y] =
+						true;
+
 
 				double componentDistance =
 						Double.POSITIVE_INFINITY;
 
+
 				while (!queue.isEmpty()) {
 
-					int[] p = queue.removeFirst();
+					int[] p =
+							queue.removeFirst();
 
-					int px = p[0];
-					int py = p[1];
+					int px =
+							p[0];
+
+					int py =
+							p[1];
+
 
 					component.add(p);
 
-					double dx = px - centerX;
-					double dy = py - centerY;
+					double dx =
+							px - centerX;
+
+					double dy =
+							py - centerY;
 
 					double distance =
-							dx * dx + dy * dy;
+							dx * dx
+									+ dy * dy;
 
-					if (distance < componentDistance) {
-						componentDistance = distance;
+					if (distance
+							< componentDistance) {
+
+						componentDistance =
+								distance;
 					}
 
-					for (int[] direction : directions) {
+					for (int[] direction :
+							directions) {
 
-						int nx = px + direction[0];
-						int ny = py + direction[1];
+						int nx =
+								px
+										+ direction[0];
 
-						if (nx < 0 || nx >= width ||
-								ny < 0 || ny >= height) {
+						int ny =
+								py
+										+ direction[1];
+
+
+						if (nx < 0
+								|| nx >= width
+								|| ny < 0
+								|| ny >= height) {
+
 							continue;
 						}
 
-						if (!visited[nx][ny] &&
-								mask[nx][ny]) {
 
-							visited[nx][ny] = true;
+						if (!visited[nx][ny]
+								&& mask[nx][ny]) {
+
+							visited[nx][ny] =
+									true;
+
 							queue.addLast(
-									new int[]{nx, ny}
+									new int[]{
+											nx,
+											ny
+									}
 							);
 						}
 					}
 				}
 
-				if (componentDistance < bestDistance) {
-					bestDistance = componentDistance;
-					bestComponent = component;
+				// Ommit small noise
+				if (component.size()
+						< minSize) {
+
+					continue;
+				}
+
+
+				switch (selection) {
+
+					// Closest to center
+					case "center" -> {
+
+						if (componentDistance
+								< bestDistance) {
+
+							bestDistance =
+									componentDistance;
+
+							bestComponent =
+									component;
+						}
+					}
+
+					// Largest
+					case "largest" -> {
+
+						if (component.size()
+								> bestSize) {
+
+							bestSize =
+									component.size();
+
+							bestComponent =
+									component;
+						}
+					}
+
+					// Both
+					case "largest_near_center" -> {
+
+						boolean nearCenter =
+								centerRadius == 0
+										|| componentDistance
+										<= maximumCenterDistanceSquared;
+
+
+						if (nearCenter
+								&& component.size()
+								> bestSize) {
+
+							bestSize =
+									component.size();
+
+							bestDistance =
+									componentDistance;
+
+							bestComponent =
+									component;
+						}
+					}
+
+
+					default ->
+							throw new IllegalArgumentException(
+									"Unknown component selection mode: "
+											+ selection
+							);
 				}
 			}
 		}
 
+
 		boolean[][] result =
 				new boolean[width][height];
 
+
 		if (bestComponent != null) {
-			for (int[] p : bestComponent) {
-				result[p[0]][p[1]] = true;
+
+			for (int[] p :
+					bestComponent) {
+
+				result[p[0]][p[1]] =
+						true;
 			}
 		}
 
+
 		return result;
+	}
+
+	// Function to not show full UID
+	private static String shortUid(String uid) {
+
+		if (uid == null || uid.isBlank()) {
+			return "?";
+		}
+
+		int length = 16;
+
+		if (uid.length() <= length) {
+			return uid;
+		}
+
+		return "..." + uid.substring(
+				uid.length() - length
+		);
 	}
 
 }

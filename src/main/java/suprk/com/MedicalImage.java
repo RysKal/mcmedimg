@@ -13,9 +13,7 @@ import java.awt.image.Raster;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Stream;
 
 public class MedicalImage {
@@ -87,17 +85,273 @@ public class MedicalImage {
                 + position[2] * nz;
     }
 
-    private static List<DicomSlice> loadDicomSeries(Path directory)
-            throws IOException {
+    public final int sizeX; // layers
+    public final int sizeY; // rows
+    public final int sizeZ; // columns
 
-        List<DicomSlice> slices = new ArrayList<>();
+    private final boolean dicom;
 
-        try (Stream<Path> files = Files.list(directory)) {
+    private final NiftiVolume niftiImg;
 
-            for (Path file : files.filter(Files::isRegularFile).toList()) {
+    private final List<DicomSlice> dicomSlices;
+
+    // cache for one DICOM slice
+    private int cachedLayer = -1;
+    private Raster cachedRaster = null;
+
+    // DICOM series
+
+    private final List<DicomSeriesInfo> dicomSeriesInfos;
+    private final int selectedDicomSeriesIndex;
+
+    // NIFTI constructor
+
+    public MedicalImage(NiftiVolume img) {
+
+        this.niftiImg = img;
+        this.dicomSlices = null;
+        this.dicom = false;
+
+        this.dicomSeriesInfos = List.of();
+        this.selectedDicomSeriesIndex = -1;
+
+        this.sizeX = img.data.sizeX();
+        this.sizeY = img.data.sizeY();
+        this.sizeZ = img.data.sizeZ();
+    }
+
+    // DICOM constructor
+
+    public MedicalImage(
+            Path dicomDirectory,
+            Integer requestedSeriesNumber
+    ) throws IOException {
+
+        this.niftiImg = null;
+        this.dicom = true;
+
+
+        List<DicomSeriesGroup> groups =
+                loadDicomSeriesGroups(
+                        dicomDirectory
+                );
+
+
+        if (groups.isEmpty()) {
+            throw new IOException(
+                    "No DICOM image series found"
+            );
+        }
+
+        int selectedIndex;
+
+        // Longest by default
+        if (requestedSeriesNumber == null) {
+
+            selectedIndex = 0;
+
+            int largestSize =
+                    groups.getFirst()
+                            .slices
+                            .size();
+
+
+            for (int i = 1;
+                 i < groups.size();
+                 i++) {
+
+                int currentSize =
+                        groups.get(i)
+                                .slices
+                                .size();
+
+                if (currentSize > largestSize) {
+
+                    largestSize =
+                            currentSize;
+
+                    selectedIndex =
+                            i;
+                }
+            }
+
+        } else {
+
+            // User starts from 1
+            if (requestedSeriesNumber < 1
+                    || requestedSeriesNumber > groups.size()) {
+
+                throw new IOException(
+                        "Series out of bounds. "
+                                + "Available series: 1-"
+                                + groups.size()
+                );
+            }
+
+            selectedIndex =
+                    requestedSeriesNumber - 1;
+        }
+
+
+        this.selectedDicomSeriesIndex =
+                selectedIndex;
+
+
+        DicomSeriesGroup selected =
+                groups.get(
+                        selectedIndex
+                );
+
+
+        this.dicomSlices =
+                List.copyOf(
+                        selected.slices
+                );
+
+        // List of series
+        List<DicomSeriesInfo> infos =
+                new ArrayList<>();
+
+        for (int i = 0;
+             i < groups.size();
+             i++) {
+
+            DicomSeriesGroup group =
+                    groups.get(i);
+
+
+            infos.add(
+                    new DicomSeriesInfo(
+                            i + 1,
+
+                            group.uid,
+                            group.description,
+
+                            group.seriesNumber,
+                            group.acquisitionNumber,
+
+                            group.modality,
+
+                            group.repetitionTime,
+                            group.echoTime,
+                            group.inversionTime,
+
+                            group.imageType,
+
+                            group.slices.size(),
+                            group.rows,
+                            group.columns,
+
+                            i == selectedIndex
+                    )
+            );
+        }
+
+        this.dicomSeriesInfos =
+                List.copyOf(
+                        infos
+                );
+
+        this.sizeX =
+                dicomSlices.size();
+
+        this.sizeY =
+                selected.rows;
+
+        this.sizeZ =
+                selected.columns;
+
+        MedicalImages.LOGGER.info(
+                "Found {} DICOM series. "
+                        + "Selected series {} with {} slices.",
+                groups.size(),
+                selectedIndex + 1,
+                dicomSlices.size()
+        );
+    }
+
+    public MedicalImage(
+            Path dicomDirectory
+    ) throws IOException {
+
+        this(
+                dicomDirectory,
+                null
+        );
+    }
+
+    private static class DicomSeriesGroup {
+
+        final String uid;
+        final String description;
+
+        final int seriesNumber;
+        final int acquisitionNumber;
+
+        final String modality;
+
+        final double repetitionTime;
+        final double echoTime;
+        final double inversionTime;
+
+        final String imageType;
+
+        final int rows;
+        final int columns;
+
+        final List<DicomSlice> slices =
+                new ArrayList<>();
+
+        DicomSeriesGroup(
+                String uid,
+                String description,
+                int seriesNumber,
+                int acquisitionNumber,
+                String modality,
+                double repetitionTime,
+                double echoTime,
+                double inversionTime,
+                String imageType,
+                int rows,
+                int columns
+        ) {
+
+            this.uid = uid;
+            this.description = description;
+
+            this.seriesNumber = seriesNumber;
+            this.acquisitionNumber = acquisitionNumber;
+
+            this.modality = modality;
+
+            this.repetitionTime = repetitionTime;
+            this.echoTime = echoTime;
+            this.inversionTime = inversionTime;
+
+            this.imageType = imageType;
+
+            this.rows = rows;
+            this.columns = columns;
+        }
+    }
+
+    private static List<DicomSeriesGroup> loadDicomSeriesGroups(
+            Path directory
+    ) throws IOException {
+
+        Map<String, DicomSeriesGroup> groups =
+                new LinkedHashMap<>();
+
+        try (Stream<Path> files =
+                     Files.list(directory)) {
+
+            for (Path file :
+                    files.filter(Files::isRegularFile).toList()) {
 
                 try (DicomInputStream dis =
-                             new DicomInputStream(file.toFile())) {
+                             new DicomInputStream(
+                                     file.toFile()
+                             )) {
 
                     dis.setIncludeBulkData(
                             DicomInputStream.IncludeBulkData.NO
@@ -106,11 +360,98 @@ public class MedicalImage {
                     Attributes attributes =
                             dis.readDatasetUntilPixelData();
 
+
                     int rows =
-                            attributes.getInt(Tag.Rows, 0);
+                            attributes.getInt(
+                                    Tag.Rows,
+                                    0
+                            );
 
                     int columns =
-                            attributes.getInt(Tag.Columns, 0);
+                            attributes.getInt(
+                                    Tag.Columns,
+                                    0
+                            );
+
+
+                    // Ommit empty or faulty
+                    if (rows <= 0 || columns <= 0) {
+                        continue;
+                    }
+
+
+                    String uid =
+                            attributes.getString(
+                                    Tag.SeriesInstanceUID
+                            );
+
+                    String description =
+                            attributes.getString(
+                                    Tag.SeriesDescription
+                            );
+
+                    String modality =
+                            attributes.getString(
+                                    Tag.Modality
+                            );
+
+                    int seriesNumber =
+                            attributes.getInt(
+                                    Tag.SeriesNumber,
+                                    -1
+                            );
+
+                    int acquisitionNumber =
+                            attributes.getInt(
+                                    Tag.AcquisitionNumber,
+                                    -1
+                            );
+
+                    double repetitionTime =
+                            attributes.getDouble(
+                                    Tag.RepetitionTime,
+                                    Double.NaN
+                            );
+
+                    double echoTime =
+                            attributes.getDouble(
+                                    Tag.EchoTime,
+                                    Double.NaN
+                            );
+
+                    double inversionTime =
+                            attributes.getDouble(
+                                    Tag.InversionTime,
+                                    Double.NaN
+                            );
+
+                    String[] imageTypes =
+                            attributes.getStrings(
+                                    Tag.ImageType
+                            );
+
+                    String imageType =
+                            imageTypes == null
+                                    ? "?"
+                                    : String.join("\\", imageTypes);
+
+                    if (uid == null || uid.isBlank()) {
+                        uid = "UNKNOWN";
+                    }
+
+                    if (description == null
+                            || description.isBlank()) {
+
+                        description =
+                                "(no description)";
+                    }
+
+                    if (modality == null
+                            || modality.isBlank()) {
+
+                        modality = "?";
+                    }
+
 
                     double slope =
                             attributes.getDouble(
@@ -125,9 +466,12 @@ public class MedicalImage {
                             );
 
                     double position =
-                            getSlicePosition(attributes);
+                            getSlicePosition(
+                                    attributes
+                            );
 
-                    slices.add(
+
+                    DicomSlice slice =
                             new DicomSlice(
                                     file,
                                     rows,
@@ -135,78 +479,123 @@ public class MedicalImage {
                                     slope,
                                     intercept,
                                     position
-                            )
+                            );
+
+                    // by UID & size
+                    String key =
+                            uid
+                                    + "|"
+                                    + rows
+                                    + "x"
+                                    + columns;
+
+
+                    DicomSeriesGroup group =
+                            groups.get(key);
+
+                    if (group == null) {
+
+                        group =
+                                new DicomSeriesGroup(
+                                        uid,
+                                        description,
+                                        seriesNumber,
+                                        acquisitionNumber,
+                                        modality,
+                                        repetitionTime,
+                                        echoTime,
+                                        inversionTime,
+                                        imageType,
+                                        rows,
+                                        columns
+                                );
+
+                        groups.put(
+                                key,
+                                group
+                        );
+                    }
+
+
+                    group.slices.add(
+                            slice
+                    );
+
+
+                } catch (Exception e) {
+
+                    MedicalImages.LOGGER.warn(
+                            "Skipping DICOM file {}: {}",
+                            file,
+                            e.getMessage()
                     );
                 }
             }
         }
 
-        slices.sort(
-                Comparator.comparingDouble(
-                        DicomSlice::position
-                )
+
+        List<DicomSeriesGroup> result =
+                new ArrayList<>(
+                        groups.values()
+                );
+
+
+        // Sort list of series
+        result.sort(
+                Comparator
+                        .comparingInt(
+                                (DicomSeriesGroup group) ->
+                                        group.seriesNumber < 0
+                                                ? Integer.MAX_VALUE
+                                                : group.seriesNumber
+                        )
+                        .thenComparing(
+                                group ->
+                                        group.description
+                        )
+                        .thenComparing(
+                                group ->
+                                        group.uid
+                        )
         );
 
-        return slices;
-    }
 
-    public final int sizeX; // layers
-    public final int sizeY; // rows
-    public final int sizeZ; // columns
+        // Sort each series
+        for (DicomSeriesGroup group : result) {
 
-    private final boolean dicom;
-
-    private final NiftiVolume niftiImg;
-
-    private final List<DicomSlice> dicomSlices;
-
-    // cache jednej warstwy DICOM
-    private int cachedLayer = -1;
-    private Raster cachedRaster = null;
-
-
-    // =========================
-    // NIFTI
-    // =========================
-
-    public MedicalImage(NiftiVolume img) {
-
-        this.niftiImg = img;
-        this.dicomSlices = null;
-        this.dicom = false;
-
-        this.sizeX = img.data.sizeX();
-        this.sizeY = img.data.sizeY();
-        this.sizeZ = img.data.sizeZ();
-    }
-
-
-    // =========================
-    // DICOM
-    // =========================
-
-    public MedicalImage(Path dicomDirectory) throws IOException {
-
-        this.niftiImg = null;
-        this.dicom = true;
-
-        this.dicomSlices = loadDicomSeries(dicomDirectory);
-
-        if (dicomSlices.isEmpty()) {
-            throw new IOException("No DICOM slices found");
+            group.slices.sort(
+                    Comparator.comparingDouble(
+                            DicomSlice::position
+                    )
+            );
         }
 
-        DicomSlice first = dicomSlices.getFirst();
 
-        this.sizeX = dicomSlices.size();
-        this.sizeY = first.rows();
-        this.sizeZ = first.columns();
+        return result;
     }
 
+    public boolean isDicom() {
+        return dicom;
+    }
 
-    // =========================
-    // UNIFIED ACCESS
-    // =========================
+    public List<DicomSeriesInfo> getDicomSeriesInfos() {
+        return dicomSeriesInfos;
+    }
+
+    public DicomSeriesInfo getSelectedDicomSeriesInfo() {
+
+        if (!dicom
+                || selectedDicomSeriesIndex < 0) {
+
+            return null;
+        }
+
+        return dicomSeriesInfos.get(
+                selectedDicomSeriesIndex
+        );
+    }
+
+    // getter of value for both types
 
     public double get(int layer, int y, int z) throws IOException {
 
@@ -218,7 +607,6 @@ public class MedicalImage {
 
         Raster raster = getDicomRaster(layer);
 
-        // Raster używa:
         // x = column
         // y = row
         double raw = raster.getSampleDouble(z, y, 0);

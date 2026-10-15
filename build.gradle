@@ -15,6 +15,10 @@ repositories {
 	}
 }
 
+configurations {
+	opencvNative
+}
+
 loom {
 	splitEnvironmentSourceSets()
 
@@ -55,6 +59,24 @@ dependencies {
 
 	implementation "org.dcm4che:dcm4che-imageio:5.35.1"
 	include "org.dcm4che:dcm4che-imageio:5.35.1"
+
+	implementation "org.dcm4che:dcm4che-imageio-opencv:5.35.1"
+	include "org.dcm4che:dcm4che-imageio-opencv:5.35.1"
+
+	implementation "org.weasis.core:weasis-core-img:5.0.0"
+	include "org.weasis.core:weasis-core-img:5.0.0"
+
+	opencvNative "org.weasis.thirdparty.org.opencv:opencv_java:5.0.0-dcm:windows-x86-64@dll"
+}
+
+tasks.register("copyOpenCvNative", Copy) {
+	from configurations.opencvNative
+
+	into layout.projectDirectory.dir("run/opencv")
+
+	rename {
+		"opencv_java.dll"
+	}
 }
 
 processResources {
@@ -63,6 +85,14 @@ processResources {
 
 	filesMatching("fabric.mod.json") {
 		expand "version": version
+	}
+
+	from(configurations.opencvNative) {
+		into "natives/windows-x86-64"
+
+		rename {
+			"opencv_java.dll"
+		}
 	}
 }
 

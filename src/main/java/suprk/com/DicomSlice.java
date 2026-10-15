@@ -1,5 +1,7 @@
 package suprk.com;
 
+// Info about one slice
+
 import java.nio.file.Path;
 
 public record DicomSlice(

@@ -10,48 +10,120 @@ import java.util.Locale;
 
 public class CTLoader {
 
-    public static MedicalImage load(String filename) throws IOException {
+    private static Path resolvePath(
+            String filename
+    ) throws IOException {
 
-        Path directory = FabricLoader.getInstance()
-                .getGameDir()
-                .resolve("medicalimages")
-                .toAbsolutePath()
-                .normalize();
+        Path directory =
+                FabricLoader.getInstance()
+                        .getGameDir()
+                        .resolve("medicalimages")
+                        .toAbsolutePath()
+                        .normalize();
 
-        Files.createDirectories(directory);
+        Files.createDirectories(
+                directory
+        );
 
-        Path path = directory
-                .resolve(filename)
-                .toAbsolutePath()
-                .normalize();
 
-        // zabezpieczenie przed ../../
+        Path path =
+                directory
+                        .resolve(filename)
+                        .toAbsolutePath()
+                        .normalize();
+
+
         if (!path.startsWith(directory)) {
-            throw new IOException("Invalid path: " + filename);
+            throw new IOException(
+                    "Invalid path: "
+                            + filename
+            );
         }
+
 
         if (!Files.exists(path)) {
-            throw new IOException("File or directory not found: " + path);
+            throw new IOException(
+                    "File or directory not found: "
+                            + path
+            );
         }
 
-        // DICOM series = katalog
+
+        return path;
+    }
+
+
+    public static MedicalImage load(
+            String filename
+    ) throws IOException {
+
+        Path path =
+                resolvePath(
+                        filename
+                );
+
+
+        // DICOM uses directory
         if (Files.isDirectory(path)) {
-            return new MedicalImage(path);
+
+            return new MedicalImage(
+                    path
+            );
         }
 
-        // NIfTI = plik
-        String name = path.getFileName()
-                .toString()
-                .toLowerCase(Locale.ROOT);
 
-        if (name.endsWith(".nii") || name.endsWith(".nii.gz")) {
-            NiftiVolume nifti = NiftiVolume.read(path.toString());
+        String name =
+                path.getFileName()
+                        .toString()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
 
-            return new MedicalImage(nifti);
+
+        if (name.endsWith(".nii")
+                || name.endsWith(".nii.gz")) {
+
+            NiftiVolume nifti =
+                    NiftiVolume.read(
+                            path.toString()
+                    );
+
+            return new MedicalImage(
+                    nifti
+            );
         }
+
 
         throw new IOException(
-                "Unsupported medical image format: " + filename
+                "Unsupported medical image format: "
+                        + filename
+        );
+    }
+
+    // Load one series
+    public static MedicalImage load(
+            String filename,
+            int seriesNumber
+    ) throws IOException {
+
+        Path path =
+                resolvePath(
+                        filename
+                );
+
+
+        if (!Files.isDirectory(path)) {
+
+            throw new IOException(
+                    "Series selection is only available "
+                            + "for DICOM directories."
+            );
+        }
+
+
+        return new MedicalImage(
+                path,
+                seriesNumber
         );
     }
 }
